@@ -1,6 +1,6 @@
 // This file is first HW of the OS class.
 // @author : Seung-gi Jin
-// @last change : 2019 03 25 16:17
+// @last change : 2019 03 26 17:50
 
 
 #include <stdio.h>
@@ -79,13 +79,13 @@ int main (int argc, char ** argv) {
 					exit(0);
 				}
 				else{
-					// Wait until every child process is finished
-					wait(0);
 
 					temp = strtok(NULL, ";");
 					ptr = trim(temp);
 				}
 			}
+			// Wait until every child process is finished
+			while(wait(0) > ) ;
 			
 		}
 	} else {
@@ -121,13 +121,13 @@ int main (int argc, char ** argv) {
 					exit(0);
 				}
 				else{
-					// Wait until every child process is finished
-					wait(0);
-
 					temp = strtok(NULL, ";");
 					ptr = trim(temp);
 				}
 			}
+			// Wait until every child process is finished
+			while(wait(0) > 0) ;
+
 			printf("prompt>");
 		}
 	}
