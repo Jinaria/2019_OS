@@ -1,6 +1,6 @@
 // This file is first HW of the OS class.
 // @author : Seung-gi Jin
-// @last change : 2019 03 26 17:50
+// @last change : 2019 03 26 19:51
 
 
 #include <stdio.h>
@@ -11,7 +11,7 @@
 #include <sys/wait.h>
 
 const int MAX_COMMAND_LENGTH = 256; // max length of input command
-
+const int MAX_ARGV_NUM = 256;
 
 
 // A function that removes spaces at both ends of a string.
@@ -70,7 +70,7 @@ int main (int argc, char ** argv) {
 				}
 				else if(pid == 0){
 					int i = 0;
-					char *_argv[5];
+					char *_argv[MAX_ARGV_NUM];
 					_argv[i] = strtok(ptr, " ");
 					while(_argv[i] != NULL){
 						_argv[++i] = strtok(NULL, " ");
@@ -112,7 +112,7 @@ int main (int argc, char ** argv) {
 				}
 				else if(pid == 0){
 					int i = 0;
-					char *_argv[5];
+					char *_argv[MAX_ARGV_NUM];
 					_argv[i] = strtok(ptr, " ");
 					while(_argv[i] != NULL){
 						_argv[++i] = strtok(NULL, " ");
