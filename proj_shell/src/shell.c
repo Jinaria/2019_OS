@@ -81,6 +81,7 @@ int main (int argc, char ** argv) {
 						_argv[++i] = strtok(NULL, " ");
 					}
 					execvp(_argv[0], _argv);
+					printf("no such command.\n");
 					exit(0);
 				}
 				else{
@@ -123,7 +124,7 @@ int main (int argc, char ** argv) {
 						_argv[++i] = strtok(NULL, " ");
 					}
 					execvp(_argv[0], _argv);
-					printf("if this message was printed, exec is failed.");
+					printf("no such command.\n");
 					exit(0);
 				}
 				else{
