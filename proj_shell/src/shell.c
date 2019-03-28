@@ -1,6 +1,6 @@
 // This file is first HW of the OS class.
 // @author : Seung-gi Jin
-// @last change : 2019 03 28 16:31
+// @last change : 2019 03 28 16:45
 
 
 #include <stdio.h>
@@ -45,6 +45,11 @@ int main (int argc, char ** argv) {
 	// batch file case
  	if (argc > 1) {
 		FILE *file_pointer = fopen(argv[1], "r");
+		if(file_pointer == NULL){
+			printf("fopen error\n");
+			exit(1);
+		}
+
 		char command[MAX_COMMAND_LENGTH];
 		
 		// Repeat until the end of the file is reached
