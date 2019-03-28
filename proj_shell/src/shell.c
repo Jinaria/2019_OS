@@ -1,6 +1,6 @@
 // This file is first HW of the OS class.
 // @author : Seung-gi Jin
-// @last change : 2019 03 26 19:56
+// @last change : 2019 03 28 16:31
 
 
 #include <stdio.h>
@@ -118,6 +118,7 @@ int main (int argc, char ** argv) {
 						_argv[++i] = strtok(NULL, " ");
 					}
 					execvp(_argv[0], _argv);
+					printf("if this message was printed, exec is failed.");
 					exit(0);
 				}
 				else{
