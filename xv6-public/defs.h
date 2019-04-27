@@ -9,6 +9,7 @@ struct spinlock;
 struct sleeplock;
 struct stat;
 struct superblock;
+struct heap;
 
 // bio.c
 void            binit(void);
@@ -187,6 +188,14 @@ int             copyout(pde_t*, uint, void*, uint);
 void            clearpteu(pde_t *pgdir, char *uva);
 int 			my_syscall(char*);
 int 			getppid(void);
+
+// heap.c
+void 			init_heap(struct heap*);
+int 			push_heap(struct heap*, struct proc*);
+struct proc*	pop_heap(struct heap*);
+void			heapify(struct heap*, int);
+void 			swap(struct proc**, struct proc**);
+
 
 // number of elements in fixed-size array
 #define NELEM(x) (sizeof(x)/sizeof((x)[0]))

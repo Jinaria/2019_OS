@@ -7,10 +7,17 @@
 #include "proc.h"
 #include "spinlock.h"
 
+#define TOTAL_TICKET 6400
+
 struct {
   struct spinlock lock;
   struct proc proc[NPROC];
 } ptable;
+
+// struct {
+
+// } mlfq;
+struct heap h;
 
 static struct proc *initproc;
 
@@ -19,6 +26,82 @@ extern void forkret(void);
 extern void trapret(void);
 
 static void wakeup1(void *chan);
+
+
+// heap function
+void init_heap(struct heap *h){
+  h->size = 0;
+  h->normal_num = 0;
+  h->total_share = 0;
+  h->min_pass = 0;
+}
+
+void swap(struct proc **a, struct proc **b){
+  struct proc *temp = *a;
+  *a = *b;
+  *b = temp;
+}
+
+int push_heap(struct heap *h, struct proc *p){
+  if (h->size >= 64){
+    cprintf("proc heap is full\n");
+    return -1;
+  }
+  h->proc_list[++h->size] = p;
+  ++h->normal_num;  
+  int idx = h->size;
+  while (idx / 2 >= 1) {
+    int parent = idx / 2;
+
+    if (h->proc_list[parent]->pass < h->proc_list[idx]->pass)
+      break;
+
+    swap(&h->proc_list[parent], &h->proc_list[idx]);
+    idx = parent;
+  }
+
+  if(h->proc_list[1]->state == SLEEPING)
+    h->min_pass = 0;
+  else
+    h->min_pass = h->proc_list[1]->pass;
+  
+  return 0;
+}
+
+struct proc* pop_heap(struct heap *h){
+  if (h->size <= 0){
+    cprintf("proc heap is empty\n");
+    return 0;
+  }
+  struct proc *ret = h->proc_list[1];
+  h->proc_list[1] = h->proc_list[h->size];
+  --h->size;
+  if(ret->kind == NORMAL)
+    h->normal_num--;
+  int idx = 1;
+  // int mid = h->size / 2 + 1;
+  // for(idx = 1; idx <= mid; idx++){
+    while (idx * 2 <= h->size) {
+      int child = idx * 2;
+
+      if (child + 1 <= h->size && h->proc_list[child]->pass > h->proc_list[child + 1]->pass)
+        child += 1;
+      if (h->proc_list[child]->pass > h->proc_list[idx]->pass)
+        break;
+      swap(&h->proc_list[child], &h->proc_list[idx]);
+
+      idx = child;
+    }
+  // }
+  if(h->proc_list[1]->state == SLEEPING)
+    h->min_pass = 0;
+  else
+    h->min_pass = h->proc_list[1]->pass;
+
+  return ret;
+}
+// heap function
+
 
 void
 pinit(void)
@@ -73,6 +156,7 @@ myproc(void) {
 static struct proc*
 allocproc(void)
 {
+
   struct proc *p;
   char *sp;
 
@@ -81,6 +165,7 @@ allocproc(void)
   for(p = ptable.proc; p < &ptable.proc[NPROC]; p++)
     if(p->state == UNUSED)
       goto found;
+    
 
   release(&ptable.lock);
   return 0;
@@ -88,7 +173,12 @@ allocproc(void)
 found:
   p->state = EMBRYO;
   p->pid = nextpid++;
-
+  p->tick = 0;
+  p->pass = 2000000000;
+  p->kind = NORMAL;
+  
+  // cprintf("push heap h address %d\n", &h);
+  
   release(&ptable.lock);
 
   // Allocate kernel stack.
@@ -122,9 +212,11 @@ userinit(void)
 {
   struct proc *p;
   extern char _binary_initcode_start[], _binary_initcode_size[];
+  int norm_ticket, i;
+
+  init_heap(&h);
 
   p = allocproc();
-  
   initproc = p;
   if((p->pgdir = setupkvm()) == 0)
     panic("userinit: out of memory?");
@@ -148,6 +240,17 @@ userinit(void)
   // because the assignment might not be atomic.
   acquire(&ptable.lock);
 
+  p->pass = h.min_pass;
+  push_heap(&h, p);
+  norm_ticket = TOTAL_TICKET * (100 - h.total_share) / 100;
+  
+  for(i = 1; i <= h.size; i++){
+
+    if(h.proc_list[i]->kind == NORMAL)
+      h.proc_list[i]->ticket = norm_ticket / h.normal_num;
+    else
+      h.proc_list[i]->ticket = TOTAL_TICKET * h.proc_list[i]->portion / 100;
+  }
   p->state = RUNNABLE;
 
   release(&ptable.lock);
@@ -180,7 +283,7 @@ growproc(int n)
 int
 fork(void)
 {
-  int i, pid;
+  int i, pid, norm_ticket;
   struct proc *np;
   struct proc *curproc = myproc();
 
@@ -188,6 +291,10 @@ fork(void)
   if((np = allocproc()) == 0){
     return -1;
   }
+
+  // if(curproc->kind == SHARE){
+
+  // }
 
   // Copy process state from proc.
   if((np->pgdir = copyuvm(curproc->pgdir, curproc->sz)) == 0){
@@ -214,9 +321,21 @@ fork(void)
 
   acquire(&ptable.lock);
 
+  np->pass = h.min_pass;
+  push_heap(&h, np);
+  norm_ticket = TOTAL_TICKET * (100 - h.total_share) / 100;
+  
+  for(i = 1; i <= h.size; i++){
+
+    if(h.proc_list[i]->kind == NORMAL)
+      h.proc_list[i]->ticket = norm_ticket / h.normal_num;
+    else
+      h.proc_list[i]->ticket = TOTAL_TICKET * h.proc_list[i]->portion / 100;
+  }
   np->state = RUNNABLE;
 
   release(&ptable.lock);
+
 
   return pid;
 }
@@ -229,7 +348,7 @@ exit(void)
 {
   struct proc *curproc = myproc();
   struct proc *p;
-  int fd;
+  int fd, i;
 
   if(curproc == initproc)
     panic("init exiting");
@@ -263,6 +382,14 @@ exit(void)
 
   // Jump into the scheduler, never to return.
   curproc->state = ZOMBIE;
+  curproc->pass = -1;
+  for(i = 1; i <= h.size; i++){
+    if(h.proc_list[i]->pid == curproc->pid)
+      break;
+  }
+  swap(&h.proc_list[i], &h.proc_list[1]);
+  pop_heap(&h);
+
   sched();
   panic("zombie exit");
 }
@@ -285,6 +412,7 @@ wait(void)
         continue;
       havekids = 1;
       if(p->state == ZOMBIE){
+        // cprintf("wait!!!!\n");
         // Found one.
         pid = p->pid;
         kfree(p->kstack);
@@ -295,6 +423,12 @@ wait(void)
         p->name[0] = 0;
         p->killed = 0;
         p->state = UNUSED;
+        p->tick = 0;
+        p->pass = 0;
+        p->ticket = 0;
+        p->temp_pass = 0;
+        p->portion = 0;
+        p->kind = NORMAL;
         release(&ptable.lock);
         return pid;
       }
@@ -306,6 +440,7 @@ wait(void)
       return -1;
     }
 
+    // cprintf("into the sleep\n");
     // Wait for children to exit.  (See wakeup1 call in proc_exit.)
     sleep(curproc, &ptable.lock);  //DOC: wait-sleep
   }
@@ -324,21 +459,71 @@ scheduler(void)
 {
   struct proc *p;
   struct cpu *c = mycpu();
-  c->proc = 0;
   
+  c->proc = 0;
+  int count = 0;
+  // int i;
+
   for(;;){
     // Enable interrupts on this processor.
     sti();
 
     // Loop over process table looking for process to run.
-    acquire(&ptable.lock);
-    for(p = ptable.proc; p < &ptable.proc[NPROC]; p++){
-      if(p->state != RUNNABLE)
-        continue;
+    // acquire(&ptable.lock);
+    // for(p = ptable.proc; p < &ptable.proc[NPROC]; p++){
+    //   if(p->state != RUNNABLE)
+    //     continue;
 
-      // Switch to chosen process.  It is the process's job
-      // to release ptable.lock and then reacquire it
-      // before jumping back to us.
+    //   // Switch to chosen process.  It is the process's job
+    //   // to release ptable.lock and then reacquire it
+    //   // before jumping back to us.
+    //   c->proc = p;
+    //   switchuvm(p);
+    //   p->state = RUNNING;
+
+    //   swtch(&(c->scheduler), p->context);
+    //   switchkvm();
+
+    //   // Process is done running for now.
+    //   // It should have changed its p->state before coming back.
+    //   c->proc = 0;
+    // }
+    // int checked = 0;
+    
+   	acquire(&ptable.lock);
+    // cprintf("h size : %d\n", h.size);
+    // cprintf("h address : %d\n", &h);
+    // while(checked < h.size){
+      if(count % 300000 == 0){
+        // for(i = 1; i <= h.size; i++){
+        //   cprintf("pid %d pass %d, ",h.proc_list[i]->pid, h.proc_list[i]->pass);
+        // }
+        // cprintf("\n");
+        // procdump();
+
+      }
+      count++;
+      // checked++;
+      p = pop_heap(&h);
+      // cprintf("pid %d\n", p->pid);
+      // for(i = 1; i <= h.size; i++){
+      //   cprintf("(%d) %d ", h.proc_list[i]->pid, h.proc_list[i]->pass);
+      // }
+      // cprintf("\nppid %d state %d size %d\n", p->pid, p->state, h.size);
+
+      if (p->state != RUNNABLE){
+        push_heap(&h, p);
+        release(&ptable.lock);  
+        continue;
+      }
+      // cprintf("(%d) pass %d, ticket %d\n", p->pid, p->pass, p->ticket);
+			p->pass += TOTAL_TICKET / p->ticket;
+      push_heap(&h, p);
+      // for(i = 1; i <= h.size; i++){
+      //   cprintf("(%d) %d ", h.proc_list[i]->pid, h.proc_list[i]->pass);
+      // }
+      // cprintf("\nppid %d state %d size %d\n", p->pid, p->state, h.size);
+      // cprintf("h size %d\n", h.size);
       c->proc = p;
       switchuvm(p);
       p->state = RUNNING;
@@ -346,10 +531,11 @@ scheduler(void)
       swtch(&(c->scheduler), p->context);
       switchkvm();
 
-      // Process is done running for now.
-      // It should have changed its p->state before coming back.
       c->proc = 0;
-    }
+
+    // }
+    
+
     release(&ptable.lock);
 
   }
@@ -418,7 +604,7 @@ void
 sleep(void *chan, struct spinlock *lk)
 {
   struct proc *p = myproc();
-  
+  int i;
   if(p == 0)
     panic("sleep");
 
@@ -439,6 +625,24 @@ sleep(void *chan, struct spinlock *lk)
   p->chan = chan;
   p->state = SLEEPING;
 
+  p->temp_pass = p->pass;
+
+  p->pass = 2000000000;
+  for(i = 1; i <= h.size; i++)
+    if(h.proc_list[i]->pid == p->pid)
+      break;
+  while(i * 2 <= h.size){
+    int child = i * 2;
+    if(child + 1 <= h.size && h.proc_list[child]->pass > h.proc_list[child + 1]->pass)
+      child += 1;
+    if(h.proc_list[child]->pass > h.proc_list[i]->pass)
+      break;
+    swap(&h.proc_list[child], &h.proc_list[i]);
+    i = child;
+  }
+
+
+
   sched();
 
   // Tidy up.
@@ -458,10 +662,14 @@ static void
 wakeup1(void *chan)
 {
   struct proc *p;
-
+  
   for(p = ptable.proc; p < &ptable.proc[NPROC]; p++)
-    if(p->state == SLEEPING && p->chan == chan)
+    if(p->state == SLEEPING && p->chan == chan){
+      p->pass = h.min_pass;
+      p->temp_pass = 0;
       p->state = RUNNABLE;
+    }
+
 }
 
 // Wake up all processes sleeping on chan.
@@ -517,13 +725,13 @@ procdump(void)
   uint pc[10];
 
   for(p = ptable.proc; p < &ptable.proc[NPROC]; p++){
-    if(p->state == UNUSED)
+    if(p->state == UNUSED/* || p->state == SLEEPING*/)
       continue;
     if(p->state >= 0 && p->state < NELEM(states) && states[p->state])
       state = states[p->state];
     else
       state = "???";
-    cprintf("%d %s %s", p->pid, state, p->name);
+    cprintf("%d %s %s %d", p->pid, state, p->name, p->pass);
     if(p->state == SLEEPING){
       getcallerpcs((uint*)p->context->ebp+2, pc);
       for(i=0; i<10 && pc[i] != 0; i++)

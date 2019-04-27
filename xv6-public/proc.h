@@ -33,6 +33,7 @@ struct context {
 };
 
 enum procstate { UNUSED, EMBRYO, SLEEPING, RUNNABLE, RUNNING, ZOMBIE };
+enum prockind { NORMAL, SHARE, MLFQ };
 
 // Per-process state
 struct proc {
@@ -49,6 +50,14 @@ struct proc {
   struct file *ofile[NOFILE];  // Open files
   struct inode *cwd;           // Current directory
   char name[16];               // Process name (debugging)
+  // my code
+  uint tick;
+  int pass;
+  enum prockind kind;
+  uint ticket;
+  uint portion;
+  uint temp_pass;
+  
 };
 
 // Process memory is laid out contiguously, low addresses first:
@@ -56,3 +65,11 @@ struct proc {
 //   original data and bss
 //   fixed-size stack
 //   expandable heap
+
+struct heap{
+  uint size;
+  uint normal_num;
+  uint total_share;
+  int min_pass;
+  struct proc *proc_list[65];
+};
