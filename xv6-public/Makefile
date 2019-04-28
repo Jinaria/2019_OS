@@ -31,6 +31,7 @@ OBJS = \
 	getppid.o\
 	yield.o\
 	cpu_share.o\
+	run_MLFQ.o\
 
 # Cross-compiling (e.g., on Mac OS X)
 # TOOLPREFIX = i386-jos-elf

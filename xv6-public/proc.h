@@ -51,12 +51,14 @@ struct proc {
   struct inode *cwd;           // Current directory
   char name[16];               // Process name (debugging)
   // my code
-  uint tick;
-  int pass;
   enum prockind kind;
+  int pass;
   uint ticket;
   uint portion;
-  uint temp_pass;
+  int level;
+  uint tick;
+  uint quantom;
+
   
 };
 
@@ -69,7 +71,21 @@ struct proc {
 struct heap{
   uint size;
   uint normal_num;
+  uint mlfq_num;
   uint total_share;
   int min_pass;
   struct proc *proc_list[65];
+  int has_mlfq;
+};
+
+struct MLFQ{
+  struct proc *q[3][NPROC];
+  uint b_tick;
+  int start[3];
+  int end[3];
+  int size[3];
+  int proc_allot[3];
+  int level_allot[3];
+  int mlfq_pass;
+  int mlfq_ticket;
 };

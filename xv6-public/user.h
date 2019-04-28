@@ -27,6 +27,8 @@ int my_syscall(char*);
 int getppid(void);
 int yield(void);
 int cpu_share(int);
+int getlev(void);
+int run_MLFQ(void);
 
 // ulib.c
 int stat(const char*, struct stat*);

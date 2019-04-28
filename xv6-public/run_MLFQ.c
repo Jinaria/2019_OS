@@ -12,56 +12,54 @@
 #define TOTAL_TICKET 6400
 
 extern struct heap h;
+extern struct MLFQ mlfq;
 
 int
-cpu_share(int portion)
-{
+getlev(void){
+	return myproc()->level;
+}
 
-	if(portion <= 0 || portion > 20){
-		cprintf("you can't allocate %d of cpu!\n", portion);
-		return -1;
-	}
+int
+run_MLFQ(void)
+{
+	if(!h.has_mlfq)
+		init_MLFQ();
 	struct proc *p = myproc();
-	// acquire(&ptable.lock);
-	int i, norm_ticket;
-	if(h.total_share + portion > 20){
-		// release(&ptable.lock);
-		return -1;
-	}
 	if(p->kind == NORMAL)
 		h.normal_num--;
-	else if(p->kind == MLFQ)
-		h.mlfq_num--;
-	p->kind = SHARE;
-	p->portion = portion;
-	h.total_share += portion;
+	if(p->kind == SHARE){
+		h.total_share -= p->portion;
+		p->portion = 0;
+	}
+	int i, norm_ticket;
+	p->pass = mlfq.mlfq_pass;
+	p->kind = MLFQ;
+	p->level = 0;
+	p->quantom = 0;
+	p->ticket = TOTAL_TICKET / 5;
+	push_MLFQ(p);
 	norm_ticket = TOTAL_TICKET * (100 - h.total_share - h.has_mlfq) / 100;
-
 	for(i = 1; i <= h.size; i++){
-
 		if(h.proc_list[i]->kind == NORMAL)
 		  h.proc_list[i]->ticket = norm_ticket / h.normal_num;
 		
 		else if(h.proc_list[i]->kind == SHARE)
 		  h.proc_list[i]->ticket = TOTAL_TICKET * h.proc_list[i]->portion / 100;
-		
 	}
-	
-	// release(&ptable.lock);
 
 	return 0;
 }
 
 // Wrapper for my_syscall
 int
-sys_cpu_share(void)
+sys_getlev(void){
+	return getlev();
+}
+
+int
+sys_run_MLFQ(void)
 {
-	int n;
-	if(argint(0, &n) < 0)
+	if(run_MLFQ() < 0)
 		return -1;
-	if(cpu_share(n) < 0){
-		cprintf("cpu_share failed\n");
-		return -1;
-	}
 	return 0;
 }

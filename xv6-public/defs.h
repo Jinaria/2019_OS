@@ -10,6 +10,7 @@ struct sleeplock;
 struct stat;
 struct superblock;
 struct heap;
+struct MLFQ;
 
 // bio.c
 void            binit(void);
@@ -189,12 +190,20 @@ void            clearpteu(pde_t *pgdir, char *uva);
 int 			my_syscall(char*);
 int 			getppid(void);
 
-// heap.c
+// heap
 void 			init_heap(struct heap*);
 int 			push_heap(struct heap*, struct proc*);
 struct proc*	pop_heap(struct heap*);
-void			heapify(struct heap*, int);
+void			build_heap(struct heap*);
 void 			swap(struct proc**, struct proc**);
+
+// MLFQ
+void			init_MLFQ();
+int 			push_MLFQ(struct proc*);
+struct proc*	pop_MLFQ();
+int 			adjust_MLFQ(struct proc*);
+void 			priority_boost();
+
 
 
 // number of elements in fixed-size array

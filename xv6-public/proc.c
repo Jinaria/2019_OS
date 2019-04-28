@@ -14,9 +14,8 @@ struct {
   struct proc proc[NPROC];
 } ptable;
 
-// struct {
+struct MLFQ mlfq;
 
-// } mlfq;
 struct heap h;
 
 static struct proc *initproc;
@@ -34,6 +33,8 @@ void init_heap(struct heap *h){
   h->normal_num = 0;
   h->total_share = 0;
   h->min_pass = 0;
+  h->has_mlfq = 0;
+  h->mlfq_num = 0;
 }
 
 void swap(struct proc **a, struct proc **b){
@@ -42,23 +43,52 @@ void swap(struct proc **a, struct proc **b){
   *b = temp;
 }
 
+void build_heap(struct heap *h){
+  int idx;
+
+  for(idx = h->size; idx > 1; idx--){
+    if(h->proc_list[idx >> 1]->pass < h->proc_list[idx]->pass) continue;
+    swap(&h->proc_list[idx >> 1], &h->proc_list[idx]);
+    int t = idx;
+    while(t + t <= h->size){
+      if (t + t + 1 <= h->size && h->proc_list[t + t + 1]->pass < h->proc_list[t + t]->pass &&
+       h->proc_list[t + t + 1]->pass < h->proc_list[t]->pass){
+          swap(&h->proc_list[t], &h->proc_list[t + t + 1]);
+          t = t + t + 1;
+      }
+      else if (h->proc_list[t + t]->pass < h->proc_list[t]->pass){
+          swap(&h->proc_list[t], &h->proc_list[t + t]);
+          t <<= 1;
+      }
+      else break;
+    }
+  }
+  // cprintf("aefjkdsf\n");
+  // for(idx = 1; idx <= h->size; idx++)
+  //   cprintf("%d ", h->proc_list[idx]->pass);
+  // cprintf("\n");
+  // cprintf("ifefjkel\n");
+}
+
 int push_heap(struct heap *h, struct proc *p){
   if (h->size >= 64){
     cprintf("proc heap is full\n");
     return -1;
   }
   h->proc_list[++h->size] = p;
-  ++h->normal_num;  
-  int idx = h->size;
-  while (idx / 2 >= 1) {
-    int parent = idx / 2;
+  build_heap(h);
+  if(p->kind == NORMAL)
+    ++h->normal_num;  
+  // int idx = h->size;
+  // while (idx / 2 >= 1) {
+  //   int parent = idx / 2;
 
-    if (h->proc_list[parent]->pass < h->proc_list[idx]->pass)
-      break;
+  //   if (h->proc_list[parent]->pass < h->proc_list[idx]->pass)
+  //     break;
 
-    swap(&h->proc_list[parent], &h->proc_list[idx]);
-    idx = parent;
-  }
+  //   swap(&h->proc_list[parent], &h->proc_list[idx]);
+  //   idx = parent;
+  // }
 
   if(h->proc_list[1]->state == SLEEPING)
     h->min_pass = 0;
@@ -78,20 +108,18 @@ struct proc* pop_heap(struct heap *h){
   --h->size;
   if(ret->kind == NORMAL)
     h->normal_num--;
-  int idx = 1;
-  // int mid = h->size / 2 + 1;
-  // for(idx = 1; idx <= mid; idx++){
-    while (idx * 2 <= h->size) {
-      int child = idx * 2;
+  build_heap(h);
+  // int idx = 1;
+  // while (idx * 2 <= h->size) {
+  //   int child = idx * 2;
 
-      if (child + 1 <= h->size && h->proc_list[child]->pass > h->proc_list[child + 1]->pass)
-        child += 1;
-      if (h->proc_list[child]->pass > h->proc_list[idx]->pass)
-        break;
-      swap(&h->proc_list[child], &h->proc_list[idx]);
+  //   if (child + 1 <= h->size && h->proc_list[child]->pass > h->proc_list[child + 1]->pass)
+  //     child += 1;
+  //   if (h->proc_list[child]->pass > h->proc_list[idx]->pass)
+  //     break;
+  //   swap(&h->proc_list[child], &h->proc_list[idx]);
 
-      idx = child;
-    }
+  //   idx = child;
   // }
   if(h->proc_list[1]->state == SLEEPING)
     h->min_pass = 0;
@@ -101,6 +129,80 @@ struct proc* pop_heap(struct heap *h){
   return ret;
 }
 // heap function
+
+// mlfq function
+void init_MLFQ(){
+  mlfq.b_tick = 0;
+  
+  int i;
+  for(i = 0; i < 3; i++){
+    mlfq.start[i] = 0;
+    mlfq.end[i] = -1;
+    mlfq.size[i] = 0;
+  }
+  h.has_mlfq = 20;
+  mlfq.mlfq_pass = h.min_pass;
+  mlfq.proc_allot[0] = 1;
+  mlfq.proc_allot[1] = 2;
+  mlfq.proc_allot[2] = 4;
+  mlfq.level_allot[0] = 5;
+  mlfq.level_allot[1] = 10;
+  mlfq.level_allot[2] = 100;
+  mlfq.mlfq_ticket = TOTAL_TICKET / 5;
+}
+
+int push_MLFQ(struct proc *p){
+  if(mlfq.size[p->level] >= 64){
+    cprintf("queue %d is full\n", p->level);
+    return -1;
+  }
+  mlfq.q[p->level][(++mlfq.end[p->level]) % 64] = p;
+  mlfq.size[p->level]++;
+  h.mlfq_num++;
+  p->quantom = 0;
+  p->pass = mlfq.mlfq_pass;
+
+  return 0;
+}
+
+struct proc* pop_MLFQ(){
+  int i;
+  for(i = 0; i < 3; i++){
+    if(mlfq.size[i] == 0)
+      continue;
+    mlfq.size[i]--;
+    h.mlfq_num--;
+    return mlfq.q[i][(mlfq.start[i]++) % 64];
+  }
+  cprintf("queue is empty\n");
+  return 0;
+}
+
+void priority_boost(){
+  struct proc *p;
+  for(int i = 1; i < 3; i++){
+      while(mlfq.size[i]){
+        p = pop_MLFQ();
+        p->level = 0;
+        p->tick = 0;
+        push_MLFQ(p);
+      }
+    }
+}
+
+int adjust_level(struct proc *p){
+  if(mlfq.b_tick >= 100){
+    priority_boost();
+    return 1;
+  }
+  if(p->level < 2 && p->tick > mlfq.level_allot[p->level]){
+    p->level++;
+    p->tick = 0;
+    return 0;
+  }
+  return -1;
+}
+// mlfq function
 
 
 void
@@ -173,11 +275,8 @@ allocproc(void)
 found:
   p->state = EMBRYO;
   p->pid = nextpid++;
-  p->tick = 0;
   p->pass = 2000000000;
   p->kind = NORMAL;
-  
-  // cprintf("push heap h address %d\n", &h);
   
   release(&ptable.lock);
 
@@ -212,7 +311,7 @@ userinit(void)
 {
   struct proc *p;
   extern char _binary_initcode_start[], _binary_initcode_size[];
-  int norm_ticket, i;
+  int norm_ticket;
 
   init_heap(&h);
 
@@ -242,17 +341,18 @@ userinit(void)
 
   p->pass = h.min_pass;
   push_heap(&h, p);
-  norm_ticket = TOTAL_TICKET * (100 - h.total_share) / 100;
+  // cprintf("adsfejfkef\n");  
+  norm_ticket = TOTAL_TICKET * (100 - h.total_share - h.has_mlfq) / 100;
   
-  for(i = 1; i <= h.size; i++){
-
-    if(h.proc_list[i]->kind == NORMAL)
-      h.proc_list[i]->ticket = norm_ticket / h.normal_num;
-    else
-      h.proc_list[i]->ticket = TOTAL_TICKET * h.proc_list[i]->portion / 100;
-  }
+  p->ticket = norm_ticket;
+  // for(i = 1; i <= h.size; i++){
+  //   if(h.proc_list[i]->kind == NORMAL)
+  //     h.proc_list[i]->ticket = norm_ticket / h.normal_num;
+  //   else if(h.proc_list[i]->kind == SHARE)
+  //     h.proc_list[i]->ticket = TOTAL_TICKET * h.proc_list[i]->portion / 100;
+  // }
+  // cprintf("in userinit\n");
   p->state = RUNNABLE;
-
   release(&ptable.lock);
 }
 
@@ -292,9 +392,6 @@ fork(void)
     return -1;
   }
 
-  // if(curproc->kind == SHARE){
-
-  // }
 
   // Copy process state from proc.
   if((np->pgdir = copyuvm(curproc->pgdir, curproc->sz)) == 0){
@@ -323,19 +420,19 @@ fork(void)
 
   np->pass = h.min_pass;
   push_heap(&h, np);
-  norm_ticket = TOTAL_TICKET * (100 - h.total_share) / 100;
+  norm_ticket = TOTAL_TICKET * (100 - h.total_share - h.has_mlfq) / 100;
   
   for(i = 1; i <= h.size; i++){
-
     if(h.proc_list[i]->kind == NORMAL)
       h.proc_list[i]->ticket = norm_ticket / h.normal_num;
-    else
+    
+    else if(h.proc_list[i]->kind == SHARE)
       h.proc_list[i]->ticket = TOTAL_TICKET * h.proc_list[i]->portion / 100;
   }
+  
   np->state = RUNNABLE;
 
   release(&ptable.lock);
-
 
   return pid;
 }
@@ -348,7 +445,7 @@ exit(void)
 {
   struct proc *curproc = myproc();
   struct proc *p;
-  int fd, i;
+  int fd, i, norm_ticket;
 
   if(curproc == initproc)
     panic("init exiting");
@@ -382,14 +479,37 @@ exit(void)
 
   // Jump into the scheduler, never to return.
   curproc->state = ZOMBIE;
-  curproc->pass = -1;
-  for(i = 1; i <= h.size; i++){
-    if(h.proc_list[i]->pid == curproc->pid)
-      break;
+  if(curproc->kind != MLFQ){
+    curproc->pass = -1;
+    for(i = 1; i <= h.size; i++){
+      if(h.proc_list[i]->pid == curproc->pid)
+        break;
+    }
+    swap(&h.proc_list[i], &h.proc_list[1]);
+    pop_heap(&h);
+    if(curproc->kind == SHARE)
+      h.total_share -= curproc->portion;
+    norm_ticket = TOTAL_TICKET * (100 - h.total_share - h.has_mlfq) / 100;
+    for(i = 1; i <= h.size; i++){
+      if(h.proc_list[i]->kind == NORMAL)
+        h.proc_list[i]->ticket = norm_ticket / h.normal_num;
+      
+      else if(h.proc_list[i]->kind == SHARE)
+        h.proc_list[i]->ticket = TOTAL_TICKET * h.proc_list[i]->portion / 100;
+      
+    }
   }
-  swap(&h.proc_list[i], &h.proc_list[1]);
-  pop_heap(&h);
-
+  else{
+    curproc->pass = -1;
+    for(i = 1; i <= h.size; i++)
+      if(h.proc_list[i]->pid == curproc->pid)
+        break;
+    
+    if(h.mlfq_num == 0)
+      h.has_mlfq = 0;
+    swap(&h.proc_list[i], &h.proc_list[1]);
+    pop_heap(&h);
+  }
   sched();
   panic("zombie exit");
 }
@@ -412,7 +532,6 @@ wait(void)
         continue;
       havekids = 1;
       if(p->state == ZOMBIE){
-        // cprintf("wait!!!!\n");
         // Found one.
         pid = p->pid;
         kfree(p->kstack);
@@ -426,7 +545,6 @@ wait(void)
         p->tick = 0;
         p->pass = 0;
         p->ticket = 0;
-        p->temp_pass = 0;
         p->portion = 0;
         p->kind = NORMAL;
         release(&ptable.lock);
@@ -440,7 +558,7 @@ wait(void)
       return -1;
     }
 
-    // cprintf("into the sleep\n");
+    
     // Wait for children to exit.  (See wakeup1 call in proc_exit.)
     sleep(curproc, &ptable.lock);  //DOC: wait-sleep
   }
@@ -458,72 +576,82 @@ void
 scheduler(void)
 {
   struct proc *p;
+  struct proc *mlfq_p;
   struct cpu *c = mycpu();
   
   c->proc = 0;
-  int count = 0;
-  // int i;
-
+  int i;
   for(;;){
     // Enable interrupts on this processor.
     sti();
 
     // Loop over process table looking for process to run.
-    // acquire(&ptable.lock);
-    // for(p = ptable.proc; p < &ptable.proc[NPROC]; p++){
-    //   if(p->state != RUNNABLE)
-    //     continue;
-
-    //   // Switch to chosen process.  It is the process's job
-    //   // to release ptable.lock and then reacquire it
-    //   // before jumping back to us.
-    //   c->proc = p;
-    //   switchuvm(p);
-    //   p->state = RUNNING;
-
-    //   swtch(&(c->scheduler), p->context);
-    //   switchkvm();
-
-    //   // Process is done running for now.
-    //   // It should have changed its p->state before coming back.
-    //   c->proc = 0;
-    // }
-    // int checked = 0;
     
    	acquire(&ptable.lock);
-    // cprintf("h size : %d\n", h.size);
-    // cprintf("h address : %d\n", &h);
-    // while(checked < h.size){
-      if(count % 300000 == 0){
-        // for(i = 1; i <= h.size; i++){
-        //   cprintf("pid %d pass %d, ",h.proc_list[i]->pid, h.proc_list[i]->pass);
-        // }
-        // cprintf("\n");
-        // procdump();
-
-      }
-      count++;
-      // checked++;
-      p = pop_heap(&h);
-      // cprintf("pid %d\n", p->pid);
-      // for(i = 1; i <= h.size; i++){
-      //   cprintf("(%d) %d ", h.proc_list[i]->pid, h.proc_list[i]->pass);
-      // }
-      // cprintf("\nppid %d state %d size %d\n", p->pid, p->state, h.size);
-
-      if (p->state != RUNNABLE){
+    // for(i = 1; i <= h.size; i++){
+    //   cprintf("(%d)%d ", h.proc_list[i]->pid, h.proc_list[i]->pass);
+    // }
+    // cprintf("\n");
+    p = pop_heap(&h);
+    // cprintf("pid %d ", p->pid);
+    
+    if (p->state != RUNNABLE){
+      push_heap(&h, p);
+      release(&ptable.lock);
+      continue;
+    }
+    if (p->kind == MLFQ){
+      push_heap(&h, p);
+      mlfq_p = pop_MLFQ();
+      
+      if(p->state != RUNNABLE){
         push_heap(&h, p);
-        release(&ptable.lock);  
+        push_MLFQ(mlfq_p);
+        release(&ptable.lock);
         continue;
       }
-      // cprintf("(%d) pass %d, ticket %d\n", p->pid, p->pass, p->ticket);
-			p->pass += TOTAL_TICKET / p->ticket;
+
+      SWITCH:
+      // for(i = 1; i <= h.size; i++)
+      //   cprintf("(%d)%d,%d ", h.proc_list[i]->pid, h.proc_list[i]->pass, h.proc_list[i]->kind);
+      // cprintf("\n\n");
+      c->proc = mlfq_p;
+      switchuvm(mlfq_p);
+      mlfq_p->state = RUNNING;
+
+      swtch(&(c->scheduler), mlfq_p->context);
+      switchkvm();
+      
+      c->proc = 0;
+      mlfq.b_tick += mlfq_p->quantom;
+      if(mlfq_p->state != RUNNABLE){
+        release(&ptable.lock);
+        continue;
+      }
+      if(mlfq_p->kind == MLFQ){
+        if(mlfq_p->tick > mlfq.level_allot[mlfq_p->level])
+          adjust_level(p);
+
+        if(mlfq_p->quantom <= mlfq.proc_allot[mlfq_p->level])
+          goto SWITCH;
+        else{
+          mlfq.mlfq_pass += TOTAL_TICKET / mlfq.mlfq_ticket * mlfq_p->quantom;
+          for(i = 1; i <= h.size; i++)
+            if(h.proc_list[i]->kind == MLFQ)
+              h.proc_list[i]->pass = mlfq.mlfq_pass;
+          push_MLFQ(mlfq_p);
+        }
+        
+      }
+
+    }
+    else {
+      p->pass += TOTAL_TICKET / p->ticket;
       push_heap(&h, p);
-      // for(i = 1; i <= h.size; i++){
-      //   cprintf("(%d) %d ", h.proc_list[i]->pid, h.proc_list[i]->pass);
-      // }
-      // cprintf("\nppid %d state %d size %d\n", p->pid, p->state, h.size);
-      // cprintf("h size %d\n", h.size);
+      // for(i = 1; i <= h.size; i++)
+      //   cprintf("(%d)%d,%d ", h.proc_list[i]->pid, h.proc_list[i]->pass, h.proc_list[i]->kind);
+      // cprintf("\n\n");
+
       c->proc = p;
       switchuvm(p);
       p->state = RUNNING;
@@ -531,10 +659,8 @@ scheduler(void)
       swtch(&(c->scheduler), p->context);
       switchkvm();
 
-      c->proc = 0;
-
-    // }
-    
+      c->proc = 0;  
+    }
 
     release(&ptable.lock);
 
@@ -553,6 +679,7 @@ sched(void)
 {
   int intena;
   struct proc *p = myproc();
+  
 
   if(!holding(&ptable.lock))
     panic("sched ptable.lock");
@@ -571,6 +698,7 @@ sched(void)
 void
 yield(void)
 {
+
   acquire(&ptable.lock);  //DOC: yieldlock
   myproc()->state = RUNNABLE;
   sched();
@@ -625,8 +753,6 @@ sleep(void *chan, struct spinlock *lk)
   p->chan = chan;
   p->state = SLEEPING;
 
-  p->temp_pass = p->pass;
-
   p->pass = 2000000000;
   for(i = 1; i <= h.size; i++)
     if(h.proc_list[i]->pid == p->pid)
@@ -640,8 +766,6 @@ sleep(void *chan, struct spinlock *lk)
     swap(&h.proc_list[child], &h.proc_list[i]);
     i = child;
   }
-
-
 
   sched();
 
@@ -665,8 +789,11 @@ wakeup1(void *chan)
   
   for(p = ptable.proc; p < &ptable.proc[NPROC]; p++)
     if(p->state == SLEEPING && p->chan == chan){
-      p->pass = h.min_pass;
-      p->temp_pass = 0;
+      if(p->kind == MLFQ)
+        p->pass = mlfq.mlfq_pass;
+      else
+        p->pass = h.min_pass;
+      
       p->state = RUNNABLE;
     }
 
