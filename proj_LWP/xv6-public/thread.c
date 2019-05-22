@@ -150,8 +150,7 @@ thread_join(thread_t thread, void **retval)
 		}
 
 		if(p->state == ZOMBIE){
-
-			if(p->used[0] != 0)
+			if(retval != 0)
 				*retval = (void*)p->used[0];
 	        kfree(p->kstack);
 	        p->kstack = 0;
