@@ -395,6 +395,9 @@ fork(void)
   else np->parent = curproc;
   *np->tf = *curproc->tf;
   np->tid = 0;
+  for(i = 1; i < NPROC; i++)
+    np->used[i] = 0;
+  np->used[0] = 1;
 
   // Clear %eax so that fork returns 0 in the child.
   np->tf->eax = 0;

@@ -206,8 +206,6 @@ thread_join(thread_t thread, void **retval)
 	struct proc *curproc = myproc();
 	struct proc *p;
 
-
-
 	acquire(&ptable.lock);
 
 	for(;;){
