@@ -118,6 +118,8 @@ thread_exit(void *retval)
 	// cprintf("thread_exit\n");
 	struct proc *curproc = myproc();
 	// struct proc *p;
+	int fd, i, norm_ticket;
+	// struct proc *p;
 	// int trash;
 
 	if(curproc->tid == 0){
@@ -127,7 +129,73 @@ thread_exit(void *retval)
 		exit();
 	}
 	curproc->used[0] = (int)retval;
-	exit();
+
+	for(fd = 0; fd < NOFILE; fd++){
+		if(curproc->ofile[fd]){
+		  fileclose(curproc->ofile[fd]);
+		  curproc->ofile[fd] = 0;
+		}
+	}
+	begin_op();
+	iput(curproc->cwd);
+	end_op();
+	curproc->cwd = 0;
+
+	acquire(&ptable.lock);
+
+  // Parent might be sleeping in wait().
+	wakeup1(curproc->parent);
+
+	// // Pass abandoned children to init.
+	// for(p = ptable.proc; p < &ptable.proc[NPROC]; p++){
+	// 	if(p->parent == curproc){
+	// 		p->parent = initproc;
+	// 		if(p->state == ZOMBIE)
+	//   			wakeup1(initproc);
+	// 	}
+	// }
+
+	// Jump into the scheduler, never to return.
+		
+	curproc->state = ZOMBIE;
+	if(curproc->kind != MLFQ){
+		curproc->pass = -1;
+		build_heap(&h);
+		for(i = 1; i <= h.size; i++)
+			if(h.proc_list[i]->pid == curproc->pid)
+				break;
+		
+		swap(&h.proc_list[i], &h.proc_list[1]);
+		pop_heap(&h);
+		if(curproc->kind == SHARE)
+			h.total_share -= curproc->portion;
+		norm_ticket = TOTAL_TICKET * (100 - h.total_share - h.has_mlfq) / 100;
+		for(i = 1; i <= h.size; i++){
+			if(h.proc_list[i]->kind == NORMAL)
+		  		h.proc_list[i]->ticket = norm_ticket / h.normal_num;
+		  
+			else if(h.proc_list[i]->kind == SHARE)
+		    	h.proc_list[i]->ticket = TOTAL_TICKET * h.proc_list[i]->portion / 100;
+
+		}
+	}
+	else{
+		curproc->pass = -1;
+		build_heap(&h);
+		for(i = 1; i <= h.size; i++)
+			if(h.proc_list[i]->pid == curproc->pid)
+				break;
+
+		if(h.mlfq_num == 0)
+			h.has_mlfq = 0;
+		swap(&h.proc_list[i], &h.proc_list[1]);
+		pop_heap(&h);
+	}
+		
+	
+	sched();
+	panic("zombie exit");
+
 }
 
 int
@@ -138,9 +206,16 @@ thread_join(thread_t thread, void **retval)
 	struct proc *curproc = myproc();
 	struct proc *p;
 
+
+
 	acquire(&ptable.lock);
 
 	for(;;){
+		// if(curproc->used[thread] == 0){
+		// 	*retval = 0;
+		// 	release(&ptable.lock);
+		// 	return 0;
+		// }
 		for(p = ptable.proc; p < &ptable.proc[NPROC]; p++)
 			if(p->pid == curproc->pid && p->tid == thread)
 				break;

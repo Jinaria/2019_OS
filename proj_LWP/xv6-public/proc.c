@@ -335,13 +335,6 @@ userinit(void)
   norm_ticket = TOTAL_TICKET * (100 - h.total_share - h.has_mlfq) / 100;
   
   p->ticket = norm_ticket;
-  // for(i = 1; i <= h.size; i++){
-  //   if(h.proc_list[i]->kind == NORMAL)
-  //     h.proc_list[i]->ticket = norm_ticket / h.normal_num;
-  //   else if(h.proc_list[i]->kind == SHARE)
-  //     h.proc_list[i]->ticket = TOTAL_TICKET * h.proc_list[i]->portion / 100;
-  // }
-  // cprintf("in userinit\n");
   p->state = RUNNABLE;
   release(&ptable.lock);
 }
@@ -353,7 +346,7 @@ growproc(int n)
 {
   uint sz;
   struct proc *curproc = myproc();
-
+  struct proc *p;
   sz = curproc->sz;
   if(n > 0){
     if((sz = allocuvm(curproc->pgdir, sz, sz + n)) == 0)
@@ -362,7 +355,9 @@ growproc(int n)
     if((sz = deallocuvm(curproc->pgdir, sz, sz + n)) == 0)
       return -1;
   }
-  curproc->sz = sz;
+  for(p = ptable.proc; p < &ptable.proc[NPROC]; p++)
+    if(p->pid == curproc->pid)
+      p->sz = sz;
   switchuvm(curproc);
   return 0;
 }
@@ -382,7 +377,6 @@ fork(void)
     return -1;
   }
 
-
   // Copy process state from proc.
   if((np->pgdir = copyuvm(curproc->pgdir, curproc->sz)) == 0){
     kfree(np->kstack);
@@ -394,8 +388,13 @@ fork(void)
     np->thread[i] = curproc->thread[i];
   }
   np->sz = curproc->sz;
-  np->parent = curproc;
+  if(curproc->tid > 0){
+    np->parent = curproc->parent;
+    np->parent_thread = curproc;
+  }
+  else np->parent = curproc;
   *np->tf = *curproc->tf;
+  np->tid = 0;
 
   // Clear %eax so that fork returns 0 in the child.
   np->tf->eax = 0;
@@ -437,33 +436,40 @@ void
 exit(void)
 {
   struct proc *curproc = myproc();
+  struct proc *mainthread;
   struct proc *p;
   int fd, i, norm_ticket;
-
+  // cprintf("pid == %d, tid == %d\n", curproc->pid, curproc->tid);
   if(curproc == initproc)
     panic("init exiting");
 
-  // if(curproc->tid > 0){
-
-  // }
+  if(curproc->tid > 0) mainthread = curproc->parent;
+  else mainthread = curproc;
 
   // Close all open files.
-  for(fd = 0; fd < NOFILE; fd++){
-    if(curproc->ofile[fd]){
-      fileclose(curproc->ofile[fd]);
-      curproc->ofile[fd] = 0;
+
+  for(p = ptable.proc; p < &ptable.proc[NPROC]; p++){
+    if(p->pid == curproc->pid){
+      for(fd = 0; fd < NOFILE; fd++){
+        if(p->ofile[fd]){
+          fileclose(p->ofile[fd]);
+          p->ofile[fd] = 0;
+        }
+      }
+      begin_op();
+      iput(p->cwd);
+      end_op();
+      p->cwd = 0;
     }
   }
-
-  begin_op();
-  iput(curproc->cwd);
-  end_op();
-  curproc->cwd = 0;
 
   acquire(&ptable.lock);
 
   // Parent might be sleeping in wait().
-  wakeup1(curproc->parent);
+  if(curproc->parent_thread != 0)
+    wakeup1(curproc->parent_thread);
+  else
+    wakeup1(mainthread->parent);
 
   // Pass abandoned children to init.
   for(p = ptable.proc; p < &ptable.proc[NPROC]; p++){
@@ -475,43 +481,43 @@ exit(void)
   }
 
   // Jump into the scheduler, never to return.
-  curproc->state = ZOMBIE;
-  if(curproc->kind != MLFQ){
-    curproc->pass = -1;
-    build_heap(&h);
-    for(i = 1; i <= h.size; i++){
-      if(h.proc_list[i]->pid == curproc->pid)
-        break;
+  for(p = ptable.proc; p < &ptable.proc[NPROC]; p++){
+    if(p->pid == curproc->pid){
+      p->state = ZOMBIE;
+      if(p->kind != MLFQ){
+        p->pass = -1;
+        build_heap(&h);
+        for(i = 1; i <= h.size; i++){
+          if(h.proc_list[i]->pid == p->pid)
+            break;
+        }
+        swap(&h.proc_list[i], &h.proc_list[1]);
+        pop_heap(&h);
+        if(p->kind == SHARE)
+          h.total_share -= p->portion;
+        norm_ticket = TOTAL_TICKET * (100 - h.total_share - h.has_mlfq) / 100;
+        for(i = 1; i <= h.size; i++){
+          if(h.proc_list[i]->kind == NORMAL)
+            h.proc_list[i]->ticket = norm_ticket / h.normal_num;
+          
+          else if(h.proc_list[i]->kind == SHARE)
+            h.proc_list[i]->ticket = TOTAL_TICKET * h.proc_list[i]->portion / 100;
+        
+        }
+      }
+      else{
+        p->pass = -1;
+        build_heap(&h);
+        for(i = 1; i <= h.size; i++)
+          if(h.proc_list[i]->pid == p->pid)
+            break;
+        
+        if(h.mlfq_num == 0)
+          h.has_mlfq = 0;
+        swap(&h.proc_list[i], &h.proc_list[1]);
+        pop_heap(&h);
+      }
     }
-    swap(&h.proc_list[i], &h.proc_list[1]);
-    // cprintf("before ");
-    // print_heap(&h);
-    pop_heap(&h);
-    // cprintf("after ");
-    // print_heap(&h);
-    if(curproc->kind == SHARE)
-      h.total_share -= curproc->portion;
-    norm_ticket = TOTAL_TICKET * (100 - h.total_share - h.has_mlfq) / 100;
-    for(i = 1; i <= h.size; i++){
-      if(h.proc_list[i]->kind == NORMAL)
-        h.proc_list[i]->ticket = norm_ticket / h.normal_num;
-      
-      else if(h.proc_list[i]->kind == SHARE)
-        h.proc_list[i]->ticket = TOTAL_TICKET * h.proc_list[i]->portion / 100;
-    
-    }
-  }
-  else{
-    curproc->pass = -1;
-    build_heap(&h);
-    for(i = 1; i <= h.size; i++)
-      if(h.proc_list[i]->pid == curproc->pid)
-        break;
-    
-    if(h.mlfq_num == 0)
-      h.has_mlfq = 0;
-    swap(&h.proc_list[i], &h.proc_list[1]);
-    pop_heap(&h);
   }
   // cprintf("pid %d tid %d upsched\n", curproc->pid, curproc->tid);
   sched();
@@ -523,16 +529,17 @@ exit(void)
 int
 wait(void)
 {
-  struct proc *p;
+  struct proc *p, *t;
   int havekids, pid;
   struct proc *curproc = myproc();
-  
+  int i;
+
   acquire(&ptable.lock);
   for(;;){
     // Scan through table looking for exited children.
     havekids = 0;
     for(p = ptable.proc; p < &ptable.proc[NPROC]; p++){
-      if(p->parent != curproc)
+      if(p->parent != curproc && p->parent_thread != curproc)
         continue;
       havekids = 1;
       if(p->state == ZOMBIE){
@@ -550,7 +557,36 @@ wait(void)
         p->pass = 0;
         p->ticket = 0;
         p->portion = 0;
+        p->quantom = 0;
+        p->tick = 0;
+        p->level = 0;
         p->kind = NORMAL;
+        for(t = ptable.proc; t < &ptable.proc[NPROC]; t++){
+          if(t->pid == pid && t->state == ZOMBIE){
+            kfree(t->kstack);
+            t->kstack = 0;
+            t->pid = 0;
+            t->parent = 0;
+            t->name[0] = 0;
+            t->killed = 0;
+            t->state = UNUSED;
+            t->tick = 0;
+            t->pass = 0;
+            t->ticket = 0;
+            t->portion = 0;
+            t->quantom = 0;
+            t->tick = 0;
+            t->level = 0;
+            t->kind = NORMAL;
+            t->parent_thread = 0;
+            t->tid = 0;
+            for(i = 0; i < NPROC; i++)
+              p->thread[i] = p->used[i] = 0;
+          }
+        }
+        p->parent_thread = 0;
+        for(i = 0; i < NPROC; i++)
+          p->thread[i] = p->used[i] = 0;
         release(&ptable.lock);
         return pid;
       }
@@ -760,7 +796,7 @@ sleep(void *chan, struct spinlock *lk)
 
   p->pass = 2000000000;
   for(i = 1; i <= h.size; i++)
-    if(h.proc_list[i]->pid == p->pid)
+    if(h.proc_list[i]->pid == p->pid && h.proc_list[i]->tid == p->tid)
       break;
   while(i * 2 <= h.size){
     int child = i * 2;
@@ -820,20 +856,21 @@ int
 kill(int pid)
 {
   struct proc *p;
+  int flag = 0;
 
   acquire(&ptable.lock);
   for(p = ptable.proc; p < &ptable.proc[NPROC]; p++){
     if(p->pid == pid){
+      if(flag == 0) flag = 1;
       p->killed = 1;
       // Wake process from sleep if necessary.
       if(p->state == SLEEPING)
         p->state = RUNNABLE;
-      release(&ptable.lock);
-      return 0;
     }
   }
   release(&ptable.lock);
-  return -1;
+  if(flag) return 0;
+  else return -1;
 }
 
 //PAGEBREAK: 36

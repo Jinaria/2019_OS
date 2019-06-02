@@ -63,7 +63,8 @@ struct proc {
   int tid;                      // if main thread, tid is 0
   uint thread[NPROC];           // user stack of each thread
   int used[NPROC];              // if main thread, this is using flag
-                                // if child thread, 0th of this is retval  
+                                // if child thread, 0th of this is retval
+  struct proc *parent_thread;  
 };
 
 // Process memory is laid out contiguously, low addresses first:

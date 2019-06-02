@@ -7,6 +7,7 @@
 #include "x86.h"
 #include "elf.h"
 
+
 int
 exec(char *path, char **argv)
 {
@@ -18,6 +19,8 @@ exec(char *path, char **argv)
   struct proghdr ph;
   pde_t *pgdir, *oldpgdir;
   struct proc *curproc = myproc();
+  // struct proc *p;
+  int flag = 0;
   // int k;
 
   begin_op();
@@ -60,24 +63,25 @@ exec(char *path, char **argv)
   end_op();
   ip = 0;
 
+  if(curproc->tid > 0){
+    // curproc->parent = 
+    // p = curproc->parent;
+    // p->used[curproc->tid] = 0;
+    flag = 1;
+  }
+  // cprintf("in exec flag %d\n");
+
   // Allocate two pages at the next page boundary.
   // Make the first inaccessible.  Use the second as the user stack.
   sz = PGROUNDUP(sz);
-  if((sz = allocuvm(pgdir, sz, sz + 2*PGSIZE)) == 0)
-    goto bad;
-  clearpteu(pgdir, (char*)(sz - 2*PGSIZE));
-  curproc->thread[curproc->tid] = sp = sz;
-  for(i = 1; i < NPROC; i++){
+  sp = sz + 2*PGSIZE;
+  for(i = 0; i < NPROC; i++){
     if((sz = allocuvm(pgdir, sz, sz + 2*PGSIZE)) == 0)
       goto bad;
     clearpteu(pgdir, (char*)(sz - 2*PGSIZE));
     curproc->thread[i] = sz;
   }
   curproc->used[0] = 1;
-  // cprintf("pid %d tid %d\n", curproc->pid, curproc->tid);
-  // for(k = 0; k < NPROC; k++){
-  //   cprintf("thread%d sp %d\n", k, curproc->thread[k]);
-  // }
 
   // Push argument strings, prepare rest of stack in ustack.
   for(argc = 0; argv[argc]; argc++) {
@@ -112,7 +116,9 @@ exec(char *path, char **argv)
   curproc->tf->esp = sp;
   // curproc->main_thread = curproc;
   switchuvm(curproc);
-  freevm(oldpgdir);
+  if(!flag)
+    freevm(oldpgdir);
+
   return 0;
 
  bad:
